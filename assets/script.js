@@ -524,7 +524,7 @@ const f=20*1000**(i/126);
 return f.toFixed(1)+' '+a.resp(f).toFixed(1);
 }).join('; ')).then(ok=>toast(ok?'Copied · GraphicEQ':'Copy failed',!ok)));
 $('#btnAB').onclick=runAB;
-const THEME_BG={dark:'#0c100f',light:'#f3f5f0'};
+const THEME_BG={dark:'#0d1117',light:'#f6f8fa'};
 const applyTheme=t=>{
 document.documentElement.dataset.theme=t;
 document.querySelectorAll('meta[name=theme-color]').forEach((m,i)=>{
