@@ -1,0 +1,115 @@
+desc: KZ EDX Pro v10 Safety Wall
+//tags: edx limiter safety lookahead
+
+preGain10:0<-120,60,1>Safety pre gain 0.1 dB
+ceilDb10:-10<-60,0,1>Safety ceiling 0.1 dBFS
+relMs:80<10,500,1>Safety release ms
+
+// Fixed constants
+// LOOK_MS 1.5 (latency equals lookahead, follows host sample rate)
+// DC blocker 2 Hz
+// No tonal processing, stereo linked detection
+
+@init
+preGain10 = 0;
+ceilDb10 = -10;
+relMs = 80;
+
+fs = srate > 0 ? srate : 48000;
+pi2 = 2 * $PI;
+
+// Lookahead window N = D + 1 samples
+D = floor(0.0015 * fs + 0.5);
+D < 2 ? ( D = 2; );
+D > 500 ? ( D = 500; );
+N = D + 1;
+cap = N + 1;
+
+// Memory map
+dlyL = 0;
+dlyR = N;
+mBuf = 2 * N;
+dqV = 3 * N;
+dqI = dqV + cap;
+
+i = 0;
+loop(N,
+  dlyL[i] = 0; dlyR[i] = 0; mBuf[i] = 1;
+  i += 1;
+);
+i = 0;
+loop(cap,
+  dqV[i] = 1; dqI[i] = 0;
+  i += 1;
+);
+
+head = 0; tail = 0; t = 0;
+w = 0; rg = 1; msum = N; sc = 0;
+
+// DC blocker
+dcRC = 1 / (pi2 * 2);
+dcA = dcRC / (dcRC + 1 / fs);
+xL1 = 0; yL1 = 0; xR1 = 0; yR1 = 0;
+
+p_gain = 1;
+ceil_lin = pow(10, -5 / 20);
+rel_k = 1 - exp(-1 / (fs * 0.080));
+prev_pre = -999; prev_ceil = -999; prev_rel = -999;
+
+@sample
+preGain10 != prev_pre ? ( prev_pre = preGain10; p_gain = pow(10, preGain10 / 200); );
+ceilDb10 != prev_ceil ? ( prev_ceil = ceilDb10; ceil_lin = pow(10, ceilDb10 / 200); );
+relMs != prev_rel ? ( prev_rel = relMs; rel_k = 1 - exp(-1 / (fs * relMs * 0.001)); );
+
+// Input guard
+abs(spl0) < 1e6 ? 0 : (spl0 = 0.0);
+abs(spl1) < 1e6 ? 0 : (spl1 = 0.0);
+
+s0 = spl0 * p_gain;
+s1 = spl1 * p_gain;
+
+// DC block
+y0 = dcA * (yL1 + s0 - xL1); xL1 = s0; yL1 = y0; s0 = y0;
+y1 = dcA * (yR1 + s1 - xR1); xR1 = s1; yR1 = y1; s1 = y1;
+
+// Required gain, linked stereo
+pk = max(abs(s0), abs(s1));
+g = pk > ceil_lin ? ceil_lin / pk : 1;
+
+// Exact sliding minimum over the last N gains, monotonic deque
+t += 1;
+while (tail > head && dqV[(tail - 1) % cap] >= g) ( tail -= 1; );
+dqV[tail % cap] = g;
+dqI[tail % cap] = t;
+tail += 1;
+while (dqI[head % cap] <= t - N) ( head += 1; );
+wm = dqV[head % cap];
+
+// Moving average of the minimum over N, running sum with periodic resync
+msum += wm - mBuf[w];
+mBuf[w] = wm;
+sc += 1;
+sc >= 4096 ? (
+  sc = 0;
+  msum = 0;
+  i = 0;
+  loop(N,
+    msum += mBuf[i];
+    i += 1;
+  );
+);
+gs = msum / N;
+
+// Instant attack, smooth release
+rg = min(gs, rg + (gs - rg) * rel_k);
+
+// Delay by D samples and apply gain
+dlyL[w] = s0; dlyR[w] = s1;
+rd = w + 1; rd >= N ? ( rd = 0; );
+spl0 = dlyL[rd] * rg;
+spl1 = dlyR[rd] * rg;
+w = rd;
+
+// Final safety clamp
+spl0 = min(max(spl0, -ceil_lin), ceil_lin);
+spl1 = min(max(spl1, -ceil_lin), ceil_lin);

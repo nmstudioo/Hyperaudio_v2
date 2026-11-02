@@ -1,0 +1,169 @@
+desc: HyperAudio EDX HA Core v1 - Residual Limiter
+//tags: hyperaudio edx core v1 limiter residual
+
+// ============================================================
+// DESIGN BASIS:
+//   H_residual = H_VDC / H_IRS
+//   max |H_residual - 1| = 3e-6 dB across 8459 points
+//   => No tonal correction here. Ever.
+//
+// Operational residual: sample-peak limiting, input gain,
+// click-free bypass, limiter presets. No tone, no compressor.
+//
+// Bypass is delayed by LOOK samples (1 ms @ 48 kHz) by design.
+// Both paths share the same delay → no comb during crossfade.
+// ============================================================
+
+// MASTER
+master:1<0,1,1{Off,On}>Master
+
+// LIMITER
+limMode:0<0,4,1{Default,Safe,Transparent,Customize,Off}>Limiter mode
+customCeil10:-15<-600,0,1>Custom ceiling tenths dBFS
+customRelease:80<10,500,1>Custom release ms
+
+// INPUT
+input10:0<-120,0,1>Input gain tenths dB
+
+@init
+// MANDATORY: every slider reassigned
+master        = 1;
+limMode       = 0;
+customCeil10  = -15;
+customRelease = 80;
+input10       = 0;
+
+// Constants
+fs   = srate > 0 ? srate : 48000;
+LOOK = 48;              // delay-line length / lookahead (1 ms @ 48 kHz)
+WIN  = LOOK + 1;        // sliding window: LOOK+1 so peak req is still in window at output time
+
+// Derived (initial; refreshed on change in @sample)
+effCeil  = -1.5;
+effRel   = 80;
+ceil_lin = 10 ^ (effCeil / 20);
+rel_k    = exp(-1 / (fs * effRel * 0.001));
+ig_lin   = 1.0;
+
+// Buffer layout — offset avoids collision with VM variables
+mem     = 10000;
+D_BUF_L = mem;              // size LOOK
+D_BUF_R = D_BUF_L + LOOK;   // size LOOK
+G_BUF   = D_BUF_R + LOOK;   // size WIN
+P_BUF   = G_BUF + WIN;      // size WIN
+S_BUF   = P_BUF + WIN;      // size WIN + 1
+
+// Init buffers (parenthesized loop bodies for parser safety)
+i = 0;
+loop(LOOK, (D_BUF_L[i] = 0; D_BUF_R[i] = 0; i += 1;));
+i = 0;
+loop(WIN, (G_BUF[i] = 1; P_BUF[i] = 1; i += 1;));
+i = 0;
+loop(WIN + 1, (S_BUF[i] = 1e30; i += 1;));
+
+// Limiter state
+dhead = 0;
+bpos  = 0;
+gs    = 1.0;
+
+// Change tracking (sentinel forces first-sample refresh)
+prevMode     = -99999;
+prevCeil10   = -99999;
+prevRelease  = -99999;
+prevInput10  = -99999;
+
+// Bypass crossfade
+bypass_state  = 0;
+bypass_target = 0;
+bypass_inc    = 1 / (0.020 * fs);
+
+@sample
+// Input guard
+!(abs(spl0) < 1e6) ? spl0 = 0.0;
+!(abs(spl1) < 1e6) ? spl1 = 0.0;
+
+// Parameter refresh
+(limMode != prevMode) + (customCeil10 != prevCeil10) + (customRelease != prevRelease) > 0 ? (
+  effCeil = -1.5;
+  effRel  = 80;
+  limMode == 0 ? ( effCeil = -1.5; effRel = 80;  );
+  limMode == 1 ? ( effCeil = -2.0; effRel = 120; );
+  limMode == 2 ? ( effCeil = -1.0; effRel = 200; );
+  limMode == 3 ? ( effCeil = customCeil10 / 10; effRel = customRelease; );
+  ceil_lin    = 10 ^ (effCeil / 20);
+  rel_k       = exp(-1 / (fs * effRel * 0.001));
+  prevMode    = limMode;
+  prevCeil10  = customCeil10;
+  prevRelease = customRelease;
+);
+
+(input10 != prevInput10) ? (
+  ig_lin      = 10 ^ (input10 / 200);
+  prevInput10 = input10;
+);
+
+// Bypass target
+bypass_target = 0;
+master == 0  ? bypass_target = 1;
+limMode == 4 ? bypass_target = 1;
+
+bypass_state < bypass_target ? (
+  bypass_state = min(bypass_target, bypass_state + bypass_inc);
+) : (
+  bypass_state = max(bypass_target, bypass_state - bypass_inc);
+);
+
+// Raw input (guarded)
+x0 = spl0;
+x1 = spl1;
+
+// Gain request (input gain included in sensitivity)
+pk  = max(abs(x0 * ig_lin), abs(x1 * ig_lin));
+req = pk > ceil_lin ? ceil_lin / pk : 1.0;
+
+// Sliding-window min (prefix + suffix)
+G_BUF[bpos] = req;
+bpos == 0 ? (
+  P_BUF[0] = req;
+) : (
+  P_BUF[bpos] = min(P_BUF[bpos - 1], req);
+);
+
+win_min = min(P_BUF[bpos], S_BUF[bpos + 1]);
+
+bpos += 1;
+bpos >= WIN ? (
+  S_BUF[WIN - 1] = G_BUF[WIN - 1];
+  i = WIN - 2;
+  loop(WIN - 1, (S_BUF[i] = min(G_BUF[i], S_BUF[i + 1]); i -= 1;));
+  S_BUF[WIN] = 1e30;
+  bpos = 0;
+);
+
+// Instant attack (preemptive: peak enters window 48 samples before it hits output)
+// Exponential release (smooth recovery after peaks leave the window)
+win_min < gs ? (
+  gs = win_min;
+) : (
+  gs = rel_k * gs + (1 - rel_k) * win_min;
+);
+
+// Delay line (raw, before input gain — bypass must be truly raw)
+dly_l = D_BUF_L[dhead];
+dly_r = D_BUF_R[dhead];
+D_BUF_L[dhead] = x0;
+D_BUF_R[dhead] = x1;
+dhead += 1;
+dhead >= LOOK ? dhead = 0;
+
+// Processed path
+proc_l = dly_l * ig_lin * gs;
+proc_r = dly_r * ig_lin * gs;
+
+// Bypass path (raw delayed, no gain)
+byp_l = dly_l;
+byp_r = dly_r;
+
+// Crossfade
+spl0 = (1 - bypass_state) * proc_l + bypass_state * byp_l;
+spl1 = (1 - bypass_state) * proc_r + bypass_state * byp_r;

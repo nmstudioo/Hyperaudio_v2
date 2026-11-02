@@ -1,0 +1,71 @@
+desc:EDX Limiter v1
+preGain10:0<-120,120,1>Pre Gain x10 dB
+ceilDb10:-5<-60,0,1>Limiter Ceiling x10 dBFS
+relMs:150<10,500,1>Limiter Release ms
+
+@init
+preGain10=preGain10;
+ceilDb10=ceilDb10;
+relMs=relMs;
+fs=srate>0?srate:48000;
+D=floor(0.0015*fs+0.5);
+D=max(2,min(500,D));
+N=D+1;
+dlyL=0;
+dlyR=N;
+gBuf=2*N;
+mBuf=3*N;
+i=0;
+loop(4*N,
+  i[0]=0;
+  i+=1;
+);
+dcR=exp(-2*$pi*2/fs);
+dxL=0; dyL=0; dxR=0; dyR=0;
+w=0;
+rg=1;
+prev_pre=-99999;
+prev_ceil=-99999;
+prev_rel=-99999;
+
+@sample
+preGain10!=prev_pre || ceilDb10!=prev_ceil || relMs!=prev_rel ? (
+  prev_pre=preGain10;
+  prev_ceil=ceilDb10;
+  prev_rel=relMs;
+  preLin=10^(preGain10/200);
+  ceilLin=10^(ceilDb10/200);
+  rel_k=1-exp(-1/(max(relMs,1)*0.001*fs));
+);
+!(abs(spl0)<1e6) ? spl0=0;
+!(abs(spl1)<1e6) ? spl1=0;
+l=spl0*preLin;
+r=spl1*preLin;
+yl=l-dxL+dcR*dyL; dxL=l; dyL=yl; l=yl;
+yr=r-dxR+dcR*dyR; dxR=r; dyR=yr; r=yr;
+pk=max(abs(l),abs(r));
+g=pk>ceilLin?ceilLin/pk:1;
+gBuf[w]=g;
+wm=1;
+j=0;
+loop(N,
+  wm=min(wm,gBuf[j]);
+  j+=1;
+);
+mBuf[w]=wm;
+sm=0;
+j=0;
+loop(N,
+  sm+=mBuf[j];
+  j+=1;
+);
+gs=sm/N;
+rg=min(gs,rg+(gs-rg)*rel_k);
+dlyL[w]=l;
+dlyR[w]=r;
+rp=w+1;
+rp>=N?rp-=N;
+spl0=dlyL[rp]*rg;
+spl1=dlyR[rp]*rg;
+w+=1;
+w>=N?w=0;

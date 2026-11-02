@@ -1,0 +1,144 @@
+desc: EDX Ultra v4 - Lookahead Limiter
+//tags: edx iem limiter lookahead safety
+
+// ============================================================
+// CHAIN (engine order): EDX_Ultra.irs (Convolver, 4 ch, Original) -> EDX_Ultra_R.vdc (DDC) -> this script
+// Role: transparent final safety limiter for the live-DSP stage. No tonal EQ, no spatial FX.
+// Order in the engine: this runs BEFORE crossfeed, post gain and the native limiter.
+// Fork modules (FET compressor, Dynamic EQ, native PEQ) run AFTER it, so keep their makeup at 0 dB.
+// Method: stereo-linked, true lookahead (1.5 ms). Sliding-min gain, release envelope, then a
+// D-sample averaged attack ramp. Guarantees |output| <= ceiling for sample peaks. Not true-peak.
+// Latency: 1.5 ms. Safety: NaN guard, 2 Hz DC blocker, 50 ms start fade, ceiling capped at -0.3 dBFS.
+// Recommended: Pre Gain 0, Ceiling -15 (-1.5 dBFS), Release 80. Native limiter -0.10 dB as backstop.
+// v4: slider defaults now assigned in the init section (v3 resolved to ceiling -0.3 dBFS / 1 ms release when the host
+//     did not apply header defaults); NaN guard uses the NaN-safe positive form; chain comment corrected.
+// ============================================================
+
+preGain10:0<-120,120,1>Pre Gain tenths dB
+ceilDb10:-15<-600,-3,1>Limiter Ceiling tenths dBFS
+relMs:80<10,500,1>Limiter Release ms
+
+@init
+// slider defaults assigned here
+preGain10 = 0;
+ceilDb10  = -15;
+relMs     = 80;
+fs = srate > 0 ? srate : 48000;
+
+D = floor(0.0015 * fs + 0.5);
+D = max(2, min(500, D));
+N = D + 1;
+
+dlyL = 0;
+dlyR = N;
+reqB = 2 * N;
+eB   = 3 * N;
+
+i = 0;
+loop(N,
+  dlyL[i] = 0;
+  dlyR[i] = 0;
+  reqB[i] = 1;
+  eB[i]   = 1;
+  i += 1;
+);
+
+w = 0;
+ew = 0;
+active = 0;
+eprev = 1;
+esum = D;
+chk = 0;
+
+dcR = exp(-2 * $PI * 2 / fs);
+dxL = 0; dyL = 0;
+dxR = 0; dyR = 0;
+
+fadeLen = max(1, floor(0.05 * fs));
+fadeN = 0;
+
+pre_k = 1 - exp(-1 / (0.01 * fs));
+preLin = 1;
+preTgt = 1;
+ceilLin = 0.8;
+rel_k = 0.001;
+
+prev_pre = -99999;
+prev_ceil = -99999;
+prev_rel = -99999;
+
+@sample
+(preGain10 != prev_pre || ceilDb10 != prev_ceil || relMs != prev_rel) ? (
+  prev_pre = preGain10;
+  prev_ceil = ceilDb10;
+  prev_rel = relMs;
+  preTgt = pow(10, preGain10 / 200);
+  ceilLin = pow(10, min(ceilDb10, -3) / 200);
+  rel_k = 1 - exp(-1 / (max(relMs, 1) * 0.001 * fs));
+);
+
+abs(spl0) < 1e6 ? 0 : (spl0 = 0);
+abs(spl1) < 1e6 ? 0 : (spl1 = 0);
+
+preLin += (preTgt - preLin) * pre_k;
+l = spl0 * preLin;
+r = spl1 * preLin;
+
+yl = l - dxL + dcR * dyL; dxL = l; dyL = yl; (abs(dyL) < 1e-30) ? ( dyL = 0; ); l = yl;
+yr = r - dxR + dcR * dyR; dxR = r; dyR = yr; (abs(dyR) < 1e-30) ? ( dyR = 0; ); r = yr;
+
+// required gain for the newest sample
+pk = max(abs(l), abs(r));
+req = pk > ceilLin ? ceilLin / pk : 1;
+
+old = reqB[w];
+(old < 1) ? ( active -= 1; );
+(req < 1) ? ( active += 1; );
+reqB[w] = req;
+dlyL[w] = l;
+dlyR[w] = r;
+
+// sliding minimum over the last D+1 samples (skipped when nothing is limiting)
+m = 1;
+(active > 0) ? (
+  i = 0;
+  loop(N,
+    (reqB[i] < m) ? ( m = reqB[i]; );
+    i += 1;
+  );
+);
+
+// instant drop, exponential release
+rec = eprev + (1 - eprev) * rel_k;
+e = min(m, rec);
+eprev = e;
+
+// attack ramp: mean of the last D envelope values
+esum += e - eB[ew];
+eB[ew] = e;
+ew += 1;
+(ew >= D) ? ( ew = 0; );
+
+chk += 1;
+(chk >= N * 8) ? (
+  i = 0; s = 0;
+  loop(D, s += eB[i]; i += 1; );
+  esum = s;
+  chk = 0;
+);
+
+g = min(1, esum / D);
+
+rp = w + 1;
+(rp >= N) ? ( rp = 0; );
+
+(fadeN < fadeLen) ? ( fadeN += 1; fg = fadeN / fadeLen; ) : ( fg = 1; );
+
+spl0 = dlyL[rp] * g * fg;
+spl1 = dlyR[rp] * g * fg;
+
+spl0 = min(max(spl0, -ceilLin), ceilLin);
+spl1 = min(max(spl1, -ceilLin), ceilLin);
+
+w += 1;
+(w >= N) ? ( w = 0; );

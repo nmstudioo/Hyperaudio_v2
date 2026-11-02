@@ -1,0 +1,300 @@
+desc: Speaker V7 Stage 2B
+//tags: speaker guard harmonic limiter lookahead 48khz
+
+preGain10:-30<-120,60,1>Pre Gain Tenths dB
+guardHz:180<140,220,1>Excursion Guard Hz
+bass100:40<0,100,1>Bass Translation Amount
+ceilDb10:-30<-60,0,1>Ceiling Tenths dBFS
+relMs:60<10,500,1>Release ms
+
+@init
+preGain10 = -30;
+guardHz = 180;
+bass100 = 40;
+ceilDb10 = -30;
+relMs = 60;
+
+fs = srate > 0 ? srate : 48000;
+pi2 = 6.28318530718;
+
+q1 = 0.541196100146197;
+q2 = 1.306562964876377;
+
+dcRC = 1.0 / (pi2 * 5.0);
+dcA = dcRC / (dcRC + 1.0 / fs);
+dcX_L = 0; dcY_L = 0;
+dcX_R = 0; dcY_R = 0;
+
+w0 = pi2 * 45.0 / fs; c = cos(w0); sn = sin(w0); al = sn / (2.0 * 0.707106781186548); a0 = 1.0 + al;
+dh_b0 = ((1.0 + c) / 2.0) / a0; dh_b1 = -(1.0 + c) / a0; dh_b2 = dh_b0;
+dh_a1 = -2.0 * c / a0; dh_a2 = (1.0 - al) / a0;
+w0 = pi2 * 180.0 / fs; c = cos(w0); sn = sin(w0); al = sn / (2.0 * 0.707106781186548); a0 = 1.0 + al;
+dl_b0 = ((1.0 - c) / 2.0) / a0; dl_b1 = (1.0 - c) / a0; dl_b2 = dl_b0;
+dl_a1 = -2.0 * c / a0; dl_a2 = (1.0 - al) / a0;
+
+hdcRC = 1.0 / (pi2 * 10.0);
+hdcA = hdcRC / (hdcRC + 1.0 / fs);
+hdcX_L = 0; hdcY_L = 0;
+hdcX_R = 0; hdcY_R = 0;
+
+dh1L = 0; dh2L = 0; dh1R = 0; dh2R = 0;
+dl1L = 0; dl2L = 0; dl1R = 0; dl2R = 0;
+
+env2 = 0;
+envAtk = 1.0 - exp(-1.0 / (fs * 0.003));
+envRel = 1.0 - exp(-1.0 / (fs * 0.080));
+envFloor = 0.00316227766016838;
+envFull = 0.251188643150958;
+
+bassMixSm = 0;
+bassMixK = 1.0 - exp(-1.0 / (fs * 0.010));
+
+harmCeil = 0.199526231496888;
+
+g1s1L = 0; g1s2L = 0; g1s1R = 0; g1s2R = 0;
+g2s1L = 0; g2s2L = 0; g2s1R = 0; g2s2R = 0;
+
+w0 = pi2 * guardHz / fs;
+c = cos(w0);
+sn = sin(w0);
+al1 = sn / (2.0 * q1);
+a0 = 1.0 + al1;
+g1_b0 = ((1.0 + c) / 2.0) / a0;
+g1_b1 = -(1.0 + c) / a0;
+g1_b2 = g1_b0;
+g1_a1 = -2.0 * c / a0;
+g1_a2 = (1.0 - al1) / a0;
+al2 = sn / (2.0 * q2);
+a0 = 1.0 + al2;
+g2_b0 = ((1.0 + c) / 2.0) / a0;
+g2_b1 = -(1.0 + c) / a0;
+g2_b2 = g2_b0;
+g2_a1 = -2.0 * c / a0;
+g2_a2 = (1.0 - al2) / a0;
+
+p_gain = pow(10, preGain10 / 200.0);
+ceil_lin = pow(10, ceilDb10 / 200.0);
+rel_k = 1.0 - exp(-1.0 / (fs * relMs * 0.001));
+
+D = floor(0.001 * fs + 0.5);
+D < 1 ? D = 1;
+D > 256 ? D = 256;
+N = D + 1;
+
+buf_curr = 10000;
+suf_min = buf_curr + N;
+dlyL = suf_min + N + 1;
+dlyR = dlyL + N;
+
+i = 0; loop(N + 1, suf_min[i] = 1.0; i += 1;);
+i = 0; loop(N, buf_curr[i] = 1.0; dlyL[i] = 0.0; dlyR[i] = 0.0; i += 1;);
+
+w = 0;
+curr_pref_min = 1.0;
+limiter_g = 1.0;
+ctl = 0;
+
+prev_pre = -99999;
+prev_guard = guardHz;
+prev_ceil = -99999;
+prev_rel = -99999;
+
+@sample
+s0 = spl0;
+s1 = spl1;
+!(abs(s0) < 1e6) ? s0 = 0.0;
+!(abs(s1) < 1e6) ? s1 = 0.0;
+
+preGain10 != prev_pre ? (
+    prev_pre = preGain10;
+    p_gain = pow(10, preGain10 / 200.0);
+);
+s0 *= p_gain;
+s1 *= p_gain;
+
+dcY_L = dcA * (dcY_L + s0 - dcX_L); dcX_L = s0; s0 = dcY_L;
+dcY_R = dcA * (dcY_R + s1 - dcX_R); dcX_R = s1; s1 = dcY_R;
+
+!(abs(dh1L) < 1e6) ? ( dh1L = 0.0; dh2L = 0.0; );
+!(abs(dh2L) < 1e6) ? ( dh1L = 0.0; dh2L = 0.0; );
+!(abs(dh1R) < 1e6) ? ( dh1R = 0.0; dh2R = 0.0; );
+!(abs(dh2R) < 1e6) ? ( dh1R = 0.0; dh2R = 0.0; );
+dhpL = dh_b0 * s0 + dh1L; dh1L = dh_b1 * s0 - dh_a1 * dhpL + dh2L; dh2L = dh_b2 * s0 - dh_a2 * dhpL;
+dhpR = dh_b0 * s1 + dh1R; dh1R = dh_b1 * s1 - dh_a1 * dhpR + dh2R; dh2R = dh_b2 * s1 - dh_a2 * dhpR;
+!(abs(dhpL) < 1e6) ? ( dhpL = 0.0; dh1L = 0.0; dh2L = 0.0; );
+!(abs(dhpR) < 1e6) ? ( dhpR = 0.0; dh1R = 0.0; dh2R = 0.0; );
+
+!(abs(dl1L) < 1e6) ? ( dl1L = 0.0; dl2L = 0.0; );
+!(abs(dl2L) < 1e6) ? ( dl1L = 0.0; dl2L = 0.0; );
+!(abs(dl1R) < 1e6) ? ( dl1R = 0.0; dl2R = 0.0; );
+!(abs(dl2R) < 1e6) ? ( dl1R = 0.0; dl2R = 0.0; );
+dL = dl_b0 * dhpL + dl1L; dl1L = dl_b1 * dhpL - dl_a1 * dL + dl2L; dl2L = dl_b2 * dhpL - dl_a2 * dL;
+dR = dl_b0 * dhpR + dl1R; dl1R = dl_b1 * dhpR - dl_a1 * dR + dl2R; dl2R = dl_b2 * dhpR - dl_a2 * dR;
+!(abs(dL) < 1e6) ? ( dL = 0.0; dl1L = 0.0; dl2L = 0.0; );
+!(abs(dR) < 1e6) ? ( dR = 0.0; dl1R = 0.0; dl2R = 0.0; );
+
+det2 = max(dL * dL, dR * dR);
+!(det2 < 1e6) ? det2 = 0.0;
+det2 > env2 ? (
+    env2 += envAtk * (det2 - env2);
+) : (
+    env2 += envRel * (det2 - env2);
+);
+env2 < 1e-20 ? env2 = 0;
+!(env2 < 1e6) ? env2 = 0;
+
+env = sqrt(env2);
+t = (env - envFloor) / (envFull - envFloor);
+t < 0.0 ? t = 0.0;
+t > 1.0 ? t = 1.0;
+!(t < 2.0) ? t = 0.0;
+envMix = t * t * (3.0 - 2.0 * t);
+
+xL = dL / (0.15 + abs(dL));
+xR = dR / (0.15 + abs(dR));
+!(abs(xL) < 2.0) ? xL = 0.0;
+!(abs(xR) < 2.0) ? xR = 0.0;
+
+xL2 = xL * xL;
+xR2 = xR * xR;
+xL3 = xL2 * xL;
+xR3 = xR2 * xR;
+xL4 = xL2 * xL2;
+xR4 = xR2 * xR2;
+harmL = 0.15 * xL2 + 0.35 * xL3 + 0.15 * xL4;
+harmR = 0.15 * xR2 + 0.35 * xR3 + 0.15 * xR4;
+!(abs(harmL) < 1e6) ? harmL = 0.0;
+!(abs(harmR) < 1e6) ? harmR = 0.0;
+
+!(abs(hdcX_L) < 1e6) ? ( hdcX_L = 0.0; hdcY_L = 0.0; );
+!(abs(hdcY_L) < 1e6) ? ( hdcX_L = 0.0; hdcY_L = 0.0; );
+!(abs(hdcX_R) < 1e6) ? ( hdcX_R = 0.0; hdcY_R = 0.0; );
+!(abs(hdcY_R) < 1e6) ? ( hdcX_R = 0.0; hdcY_R = 0.0; );
+y = hdcA * (hdcY_L + harmL - hdcX_L); hdcX_L = harmL; hdcY_L = y; harmL = y;
+y = hdcA * (hdcY_R + harmR - hdcX_R); hdcX_R = harmR; hdcY_R = y; harmR = y;
+!(abs(harmL) < 1e6) ? ( harmL = 0.0; hdcX_L = 0.0; hdcY_L = 0.0; );
+!(abs(harmR) < 1e6) ? ( harmR = 0.0; hdcX_R = 0.0; hdcY_R = 0.0; );
+
+bass100 > 0 ? (
+    bassMixSm += bassMixK * ((bass100 / 100.0) * envMix - bassMixSm);
+) : (
+    bassMixSm = 0;
+);
+!(abs(bassMixSm) < 2.0) ? bassMixSm = 0;
+
+hL = harmL * bassMixSm;
+hR = harmR * bassMixSm;
+!(abs(hL) < 2.0) ? hL = 0.0;
+!(abs(hR) < 2.0) ? hR = 0.0;
+hL = min(max(hL, -harmCeil), harmCeil);
+hR = min(max(hR, -harmCeil), harmCeil);
+
+s0 += hL;
+s1 += hR;
+
+guardHz != prev_guard ? (
+    prev_guard = guardHz;
+    w0 = pi2 * guardHz / fs;
+    c = cos(w0);
+    sn = sin(w0);
+    al1 = sn / (2.0 * q1);
+    a0 = 1.0 + al1;
+    g1_b0 = ((1.0 + c) / 2.0) / a0;
+    g1_b1 = -(1.0 + c) / a0;
+    g1_b2 = g1_b0;
+    g1_a1 = -2.0 * c / a0;
+    g1_a2 = (1.0 - al1) / a0;
+    al2 = sn / (2.0 * q2);
+    a0 = 1.0 + al2;
+    g2_b0 = ((1.0 + c) / 2.0) / a0;
+    g2_b1 = -(1.0 + c) / a0;
+    g2_b2 = g2_b0;
+    g2_a1 = -2.0 * c / a0;
+    g2_a2 = (1.0 - al2) / a0;
+);
+
+!(abs(g1s1L) < 1e6) ? ( g1s1L = 0.0; g1s2L = 0.0; );
+!(abs(g1s2L) < 1e6) ? ( g1s1L = 0.0; g1s2L = 0.0; );
+!(abs(g1s1R) < 1e6) ? ( g1s1R = 0.0; g1s2R = 0.0; );
+!(abs(g1s2R) < 1e6) ? ( g1s1R = 0.0; g1s2R = 0.0; );
+out = g1_b0 * s0 + g1s1L; g1s1L = g1_b1 * s0 - g1_a1 * out + g1s2L; g1s2L = g1_b2 * s0 - g1_a2 * out;
+!(abs(out) < 1e6) ? ( out = 0.0; g1s1L = 0.0; g1s2L = 0.0; );
+
+!(abs(g2s1L) < 1e6) ? ( g2s1L = 0.0; g2s2L = 0.0; );
+!(abs(g2s2L) < 1e6) ? ( g2s1L = 0.0; g2s2L = 0.0; );
+out2 = g2_b0 * out + g2s1L; g2s1L = g2_b1 * out - g2_a1 * out2 + g2s2L; g2s2L = g2_b2 * out - g2_a2 * out2;
+!(abs(out2) < 1e6) ? ( out2 = 0.0; g2s1L = 0.0; g2s2L = 0.0; );
+s0 = out2;
+
+!(abs(g1s1R) < 1e6) ? ( g1s1R = 0.0; g1s2R = 0.0; );
+!(abs(g1s2R) < 1e6) ? ( g1s1R = 0.0; g1s2R = 0.0; );
+out = g1_b0 * s1 + g1s1R; g1s1R = g1_b1 * s1 - g1_a1 * out + g1s2R; g1s2R = g1_b2 * s1 - g1_a2 * out;
+!(abs(out) < 1e6) ? ( out = 0.0; g1s1R = 0.0; g1s2R = 0.0; );
+
+!(abs(g2s1R) < 1e6) ? ( g2s1R = 0.0; g2s2R = 0.0; );
+!(abs(g2s2R) < 1e6) ? ( g2s1R = 0.0; g2s2R = 0.0; );
+out2 = g2_b0 * out + g2s1R; g2s1R = g2_b1 * out - g2_a1 * out2 + g2s2R; g2s2R = g2_b2 * out - g2_a2 * out2;
+!(abs(out2) < 1e6) ? ( out2 = 0.0; g2s1R = 0.0; g2s2R = 0.0; );
+s1 = out2;
+
+ceilDb10 != prev_ceil ? (
+    prev_ceil = ceilDb10;
+    ceil_lin = pow(10, ceilDb10 / 200.0);
+);
+relMs != prev_rel ? (
+    prev_rel = relMs;
+    rel_k = 1.0 - exp(-1.0 / (fs * relMs * 0.001));
+);
+
+pk = max(abs(s0), abs(s1));
+g_inst = (pk > ceil_lin) ? (ceil_lin / pk) : 1.0;
+g_inst < 0.001 ? g_inst = 0.001;
+
+buf_curr[w] = g_inst;
+curr_pref_min = min(curr_pref_min, g_inst);
+req_g = min(suf_min[w + 1], curr_pref_min);
+
+req_g < limiter_g ? (
+    limiter_g = req_g;
+) : (
+    limiter_g += rel_k * (req_g - limiter_g);
+);
+
+rd = w + 1; rd >= N ? ( rd = 0; );
+outL = dlyL[rd] * limiter_g;
+outR = dlyR[rd] * limiter_g;
+
+dlyL[w] = s0;
+dlyR[w] = s1;
+w = rd;
+
+w == 0 ? (
+    temp_min = buf_curr[N - 1];
+    suf_min[N - 1] = temp_min;
+    lp = N - 2;
+    while(lp >= 0) (
+        temp_min = min(buf_curr[lp], temp_min);
+        suf_min[lp] = temp_min;
+        lp -= 1;
+    );
+    suf_min[N] = 1.0;
+    curr_pref_min = 1.0;
+);
+
+ctl += 1;
+ctl >= 1024 ? (
+    ctl = 0;
+    abs(dcY_L) < 1e-30 ? ( dcX_L = 0; dcY_L = 0; );
+    abs(dcY_R) < 1e-30 ? ( dcX_R = 0; dcY_R = 0; );
+    abs(hdcY_L) < 1e-30 ? ( hdcX_L = 0; hdcY_L = 0; );
+    abs(hdcY_R) < 1e-30 ? ( hdcX_R = 0; hdcY_R = 0; );
+    abs(env2) < 1e-30 ? ( env2 = 0; );
+    abs(bassMixSm) < 1e-30 ? ( bassMixSm = 0; );
+    abs(g1s1L) < 1e-30 ? ( g1s1L = 0; g1s2L = 0; );
+    abs(g1s1R) < 1e-30 ? ( g1s1R = 0; g1s2R = 0; );
+    abs(g2s1L) < 1e-30 ? ( g2s1L = 0; g2s2L = 0; );
+    abs(g2s1R) < 1e-30 ? ( g2s1R = 0; g2s2R = 0; );
+);
+
+spl0 = min(max(outL, -ceil_lin), ceil_lin);
+spl1 = min(max(outR, -ceil_lin), ceil_lin);

@@ -1,0 +1,160 @@
+desc: HyperAudio Redmi 12 Speaker Wall v10
+//tags: hyperaudio speaker compressor limiter loudness
+
+mode:2<0,2,1{Bypass,Limiter only,Loudness}>Processing mode
+inputGain10:0<-120,60,1>Input gain 0.1 dB
+compThresh:-26<-60,0,1>Compressor threshold dBFS
+compRatio10:20<10,100,1>Compressor ratio x10
+makeup:10<0,18,1>Loudness makeup dB
+ceiling10:-20<-120,0,1>Peak ceiling 0.1 dBFS
+releaseMs:80<20,300,1>Limiter release ms
+
+// Fixed constants
+// LOOK_MS 1.0 lookahead limiter, latency follows host sample rate
+// COMP_ATTACK_MS 10, COMP_RELEASE_MS 150, KNEE_DB 6
+// Signal flow: input gain, compressor with makeup, lookahead limiter, final clamp
+
+@init
+mode = 2;
+inputGain10 = 0;
+compThresh = -26;
+compRatio10 = 20;
+makeup = 10;
+ceiling10 = -20;
+releaseMs = 80;
+
+fs = srate > 0 ? srate : 48000;
+LA = floor(0.001 * fs + 0.5);
+LA < 2 ? ( LA = 2; );
+LA > 500 ? ( LA = 500; );
+N = LA + 1;
+cap = N + 1;
+
+dlyL = 10000;
+dlyR = dlyL + N;
+mBuf = dlyR + N;
+dqV = mBuf + N;
+dqI = dqV + cap;
+
+i = 0;
+loop(N,
+  dlyL[i] = 0; dlyR[i] = 0; mBuf[i] = 1;
+  i += 1;
+);
+i = 0;
+loop(cap,
+  dqV[i] = 1; dqI[i] = 0;
+  i += 1;
+);
+
+head = 0; tail = 0; t = 0;
+w = 0; rg = 1; msum = N; sc = 0;
+env = 0;
+prevMode = mode;
+
+atkK = 1 - exp(-1 / (fs * 0.010));
+relK = 1 - exp(-1 / (fs * 0.150));
+KNEE = 6;
+
+preGain = pow(10, inputGain10 / 200);
+ceiling = min(max(pow(10, ceiling10 / 200), 0.001), 1);
+releaseCoeff = 1 - exp(-1 / (fs * releaseMs * 0.001));
+ratioInv = 10 / compRatio10;
+prevInputGain10 = inputGain10;
+prevCeiling10 = ceiling10;
+prevReleaseMs = releaseMs;
+prevRatio10 = compRatio10;
+
+@sample
+abs(spl0) < 1e6 ? 0 : (spl0 = 0.0);
+abs(spl1) < 1e6 ? 0 : (spl1 = 0.0);
+
+mode == 0 ? (
+  prevMode = 0;
+) : (
+  prevMode == 0 ? (
+    i = 0;
+    loop(N,
+      dlyL[i] = 0; dlyR[i] = 0; mBuf[i] = 1;
+      i += 1;
+    );
+    head = 0; tail = 0;
+    msum = N; rg = 1; sc = 0; env = 0;
+  );
+  prevMode = mode;
+
+  inputGain10 != prevInputGain10 ? (
+    prevInputGain10 = inputGain10;
+    preGain = pow(10, inputGain10 / 200);
+  );
+  ceiling10 != prevCeiling10 ? (
+    prevCeiling10 = ceiling10;
+    ceiling = min(max(pow(10, ceiling10 / 200), 0.001), 1);
+  );
+  releaseMs != prevReleaseMs ? (
+    prevReleaseMs = releaseMs;
+    releaseCoeff = 1 - exp(-1 / (fs * releaseMs * 0.001));
+  );
+  compRatio10 != prevRatio10 ? (
+    prevRatio10 = compRatio10;
+    ratioInv = 10 / compRatio10;
+  );
+
+  pL = spl0 * preGain;
+  pR = spl1 * preGain;
+
+  // Compressor, stereo linked, power domain ballistics, soft knee
+  mode == 2 ? (
+    pw = 0.5 * (pL * pL + pR * pR);
+    env += (pw - env) * (pw > env ? atkK : relK);
+    lvl = 4.342944819 * log(env + 1e-12);
+    over = lvl - compThresh;
+    over < -0.5 * KNEE ? (
+      gr = 0;
+    ) : (
+      over <= 0.5 * KNEE ? (
+        q = over + 0.5 * KNEE;
+        gr = (ratioInv - 1) * q * q / (2 * KNEE);
+      ) : (
+        gr = (ratioInv - 1) * over;
+      );
+    );
+    cg = exp((gr + makeup) * 0.1151292546);
+    pL *= cg;
+    pR *= cg;
+  );
+
+  // Lookahead limiter, linked gain request
+  pk = max(abs(pL), abs(pR));
+  g = pk > ceiling ? ceiling / pk : 1;
+
+  t += 1;
+  while (tail > head && dqV[(tail - 1) % cap] >= g) ( tail -= 1; );
+  dqV[tail % cap] = g;
+  dqI[tail % cap] = t;
+  tail += 1;
+  while (dqI[head % cap] <= t - N) ( head += 1; );
+  wm = dqV[head % cap];
+
+  msum += wm - mBuf[w];
+  mBuf[w] = wm;
+  sc += 1;
+  sc >= 4096 ? (
+    sc = 0;
+    msum = 0;
+    i = 0;
+    loop(N,
+      msum += mBuf[i];
+      i += 1;
+    );
+  );
+  gs = msum / N;
+
+  rg = min(gs, rg + (gs - rg) * releaseCoeff);
+
+  dlyL[w] = pL; dlyR[w] = pR;
+  rd = w + 1; rd >= N ? ( rd = 0; );
+  spl0 = min(max(dlyL[rd] * rg, -ceiling), ceiling);
+  spl1 = min(max(dlyR[rd] * rg, -ceiling), ceiling);
+  w = rd;
+);

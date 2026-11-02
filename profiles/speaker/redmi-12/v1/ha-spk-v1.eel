@@ -1,0 +1,56 @@
+desc:HA Speaker Linked Peak Guard v1.1
+// Post-VDC protection only. No EQ, bass synthesis, crossfeed or widening.
+// Linked stereo sample-peak limiter; 1 ms lookahead; 80 ms release.
+// O(1) detector per sample; not true-peak or hardware-excursion protection.
+master:1<0,1,1{Bypass,Protect}>Processing
+
+@init
+fs = srate > 0 ? srate : 48000;
+LA = floor(fs * 0.001 + 0.5);
+LA < 1 ? LA = 1;
+RING = 256;
+LA >= RING-1 ? LA = RING-2;
+mem = 10000;
+dlyL = mem;
+dlyR = dlyL + RING;
+w = 0;
+validSamples = 0;
+limGain = 1.0;
+holdCount = 0;
+ceiling = 0.841395141645195;
+releaseMs = 80.0;
+releaseCoeff = 1.0 - exp(-1.0 / (fs * releaseMs * 0.001));
+i = 0;
+loop(RING,
+  dlyL[i] = 0;
+  dlyR[i] = 0;
+  i += 1;
+);
+
+@sample
+xL = spl0;
+xR = spl1;
+!(abs(xL) < 1000000) ? xL = 0;
+!(abs(xR) < 1000000) ? xR = 0;
+dlyL[w] = xL;
+dlyR[w] = xR;
+peakNow = max(abs(xL),abs(xR));
+peakNow > ceiling ? (
+  reqGain = ceiling / peakNow;
+  reqGain < limGain ? limGain = reqGain;
+  holdCount = LA;
+) : (
+  holdCount > 0 ? holdCount -= 1 :
+    limGain += releaseCoeff * (1.0-limGain);
+);
+rd = w - LA;
+rd < 0 ? rd += RING;
+outL = dlyL[rd] * limGain;
+outR = dlyR[rd] * limGain;
+w += 1;
+w >= RING ? w = 0;
+validSamples < LA+1 ? validSamples += 1;
+validSamples < LA+1 ? (outL = 0; outR = 0;);
+outL = min(max(outL,-ceiling),ceiling);
+outR = min(max(outR,-ceiling),ceiling);
+master == 0 ? (spl0 = xL; spl1 = xR;) : (spl0 = outL; spl1 = outR;);
