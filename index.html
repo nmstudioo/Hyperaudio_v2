@@ -255,7 +255,7 @@ document.documentElement.dataset.theme=(()=>{try{return localStorage.theme}catch
 </ul>
 </details>
 <details class="acc"><summary><span><b>Verification harness</b><small>Run offline checks on both chains</small></span><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></summary><div class="harness">
-<div><h3>Verification harness</h3><p>Offline checks on both chains. Not app, ARM or device validation.</p></div>
+<div><p>Offline checks on both chains. Not app, ARM or device validation.</p></div>
 <button class="btn ghost" id="btnAB" type="button"><svg class="i" aria-hidden="true"><use href="#i-play"/></svg>Run tests</button>
 </div>
 <div class="console" id="console" role="log" aria-live="polite">Ready.</div></details>
@@ -268,8 +268,8 @@ document.documentElement.dataset.theme=(()=>{try{return localStorage.theme}catch
 <header class="sec-h"><span class="lbl">10</span><h2>Raw and target curves</h2></header>
 <p class="qa-note">Each correction is fitted against a target curve, in dB relative to 1 kHz. Both targets are custom, built offline, and not published standards. Listening results outrank the curves.</p>
 <details class="acc"><summary><span><b>Raw vs target curves</b><small>Tap a chart to enlarge</small></span><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></summary><div class="acc-body"><div class="x-grid two"><figure class="x-fig"><img src="assets/KZ_EDX_Pro_target.png" alt="KZ EDX Pro raw response vs target" loading="lazy" decoding="async" width="1040" height="585"><figcaption>KZ EDX Pro. Legacy target illustration; not independent validation of the v5-HD release.</figcaption></figure><figure class="x-fig"><img src="assets/Redmi12_Speaker_target.png" alt="Redmi 12 speaker raw response vs target" loading="lazy" decoding="async" width="1040" height="585"><figcaption>Redmi 12 speaker. Legacy target illustration; not independent validation of the V6 release.</figcaption></figure></div>
-<p class="qa-note" style="margin-top:var(--s4)">Method and principles: <a href="https://github.com/nmstudioo/Hyperaudio_v2/blob/main/data/methodology.md" data-doc="data/methodology.md">Raw and target curves</a>.</p>
-<ul class="x-list" style="margin-top:var(--s5)"><li><b>Trust broad shape</b> over narrow detail, especially on a single-position speaker measurement.</li><li><b>Never correct an artifact</b> such as a coupler resonance or a room effect.</li><li><b>Never boost where the device has no output.</b> The speaker has almost nothing below 100 Hz.</li></ul></div></details>
+<p class="qa-note">Method and principles: <a href="https://github.com/nmstudioo/Hyperaudio_v2/blob/main/data/methodology.md" data-doc="data/methodology.md">Raw and target curves</a>.</p>
+<ul class="x-list"><li><b>Trust broad shape</b> over narrow detail, especially on a single-position speaker measurement.</li><li><b>Never correct an artifact</b> such as a coupler resonance or a room effect.</li><li><b>Never boost where the device has no output.</b> The speaker has almost nothing below 100 Hz.</li></ul></div></details>
 </section>
 <section id="addons" class="sec wrap">
 <header class="sec-h"><span class="lbl">11</span><h2>Optional Add-ons</h2></header>
@@ -341,7 +341,7 @@ document.documentElement.dataset.theme=(()=>{try{return localStorage.theme}catch
 ├── tools/build_assets.py      size/hash manifest and bundle builder
 ├── assets.json                generated download catalogue
 └── assets/                    site code, graphics and fonts</pre></div></details>
-<div class="x-grid two"><div class="x-tbl"><table><thead><tr><th>Scope</th><th>Licence</th></tr></thead><tbody><tr><td>EEL2 code (.eel)</td><td data-l="Licence"><a href="https://github.com/nmstudioo/Hyperaudio_v2/blob/main/LICENSE-MIT">MIT</a></td></tr><tr><td>Audio artifacts (.irs, .vdc) and reports</td><td data-l="Licence"><a href="https://github.com/nmstudioo/Hyperaudio_v2/blob/main/LICENSE-CC-BY-SA-4.0">CC BY-SA 4.0</a></td></tr></tbody></table></div><p class="qa-note" style="margin:0">Presets derive from AutoEq-format data (jaakkopasanen/AutoEq, MIT) via RikudouGoku's database, corroborated by Speaker Ranking. EEL2 scripts target the VM in RootlessJamesDSP (ThePBone, Apache 2.0). No third-party code or raw measurements are redistributed. See <a href="https://github.com/nmstudioo/Hyperaudio_v2/blob/main/ATTRIBUTION.md" data-doc="ATTRIBUTION.md">ATTRIBUTION.md</a>.</p></div>
+<div class="x-grid two"><div class="x-tbl"><table><thead><tr><th>Scope</th><th>Licence</th></tr></thead><tbody><tr><td>EEL2 code (.eel)</td><td data-l="Licence"><a href="https://github.com/nmstudioo/Hyperaudio_v2/blob/main/LICENSE-MIT">MIT</a></td></tr><tr><td>Audio artifacts (.irs, .vdc) and reports</td><td data-l="Licence"><a href="https://github.com/nmstudioo/Hyperaudio_v2/blob/main/LICENSE-CC-BY-SA-4.0">CC BY-SA 4.0</a></td></tr></tbody></table></div><p class="qa-note">Presets derive from AutoEq-format data (jaakkopasanen/AutoEq, MIT) via RikudouGoku's database, corroborated by Speaker Ranking. EEL2 scripts target the VM in RootlessJamesDSP (ThePBone, Apache 2.0). No third-party code or raw measurements are redistributed. See <a href="https://github.com/nmstudioo/Hyperaudio_v2/blob/main/ATTRIBUTION.md" data-doc="ATTRIBUTION.md">ATTRIBUTION.md</a>.</p></div>
 </section>
 </main>
 <footer class="foot">
